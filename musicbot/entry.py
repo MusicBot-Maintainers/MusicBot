@@ -288,6 +288,9 @@ class URLPlaylistEntry(BasePlaylistEntry):
         p = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         log.debug('Starting asyncio subprocess ({0}) with command: {1}'.format(p, cmd))
         stdout, stderr = await p.communicate()
+        if p.returncode != 0:
+            # @TheerapakG: TODO: better exception, with return code and stderr
+            raise Exception("process returned non-zero exit code")
         return stdout + stderr
 
     def get(self, program):
@@ -314,7 +317,31 @@ class URLPlaylistEntry(BasePlaylistEntry):
     async def get_mean_volume(self, input_file):
         log.debug('Calculating mean volume of {0}'.format(input_file))
         cmd = '"' + self.get('ffmpeg') + '" -i "' + input_file + '" -af loudnorm=I=-24.0:LRA=7.0:TP=-2.0:linear=true:print_format=json -f null /dev/null'
-        output = await self.run_command(cmd)
+        try:
+            output = await self.run_command(cmd)
+        except Exception:
+            # @TheerapakG: TODO: FuNcTiOn
+            # Just push it near the ceiling and call it a day
+            cmd = '"' + self.get('ffmpeg') + '" -i "' + input_file + '" -af "volumedetect" -f null /dev/null'
+            output = await self.run_command(cmd)
+            output = output.decode("utf-8")
+
+            mean_volume_matches = re.findall(r"mean_volume: ([\-\d\.]+) dB", output)	
+            if (mean_volume_matches):
+                mean_volume = float(mean_volume_matches[0])
+            else:
+                mean_volume = float(0)
+                
+            max_volume_matches = re.findall(r"max_volume: ([\-\d\.]+) dB", output)
+            if (max_volume_matches):
+                max_volume = float(max_volume_matches[0])
+            else:
+                max_volume = float(0)
+
+            log.debug('Calculated mean volume as {0}'.format(mean_volume))
+
+            return '-af "volume={}dB"'.format((max_volume * -1))
+
         output = output.decode("utf-8")
         log.debug(output)
         # print('----', output)
